@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+take2/output/
+take2/PDFs/
+take2/__pycache__/
+*.ttc
+Cover.png
+blank spreads.pdf
+1.pdf
+2-25.pdf
+26-55.pdf
+56-75.pdf
+76-107.pdf
+108-.pdf
+For colab/
