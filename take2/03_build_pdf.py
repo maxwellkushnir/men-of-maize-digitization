@@ -24,15 +24,27 @@ READER_EDITION = True
 
 OUTPUT_DIR = Path(__file__).parent / "output"
 BOOK_DIR   = Path(__file__).parent.parent   # Raw Data (to use)/
-COVER_PDF  = BOOK_DIR / "1.pdf"
+COVER_PDF  = BOOK_DIR / "1.pdf"  # may also be 1.png
 
 STRUCTURED_JSON = OUTPUT_DIR / "men_of_maize_structured.json"
 OUTPUT_PDF      = OUTPUT_DIR / "men_of_maize.pdf"
 
-# Baskerville font — local copy (same dir as script) takes priority over macOS system path
+# EB Garamond — preferred body font; falls back to Baskerville if not installed
+# Install in Colab with: apt-get install -y fonts-ebgaramond
+_ebgaramond_paths = [
+    Path(__file__).parent / "EBGaramond-Regular.ttf",
+    Path("/usr/share/fonts/truetype/ebgaramond/EBGaramond-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/ebgaramond/EBGaramond12-Regular.ttf"),
+]
+_ebgaramond_found = next((p for p in _ebgaramond_paths if p.exists()), None)
+
 _baskerville_local  = Path(__file__).parent / "Baskerville.ttc"
 _baskerville_system = Path("/System/Library/Fonts/Supplemental/Baskerville.ttc")
 BASKERVILLE_PATH = str(_baskerville_local if _baskerville_local.exists() else _baskerville_system)
+
+USE_EBGARAMOND = _ebgaramond_found is not None
+BODY_FONT_NAME = "EB Garamond" if USE_EBGARAMOND else "Baskerville"
+BODY_FONT_PATH = str(_ebgaramond_found) if USE_EBGARAMOND else BASKERVILLE_PATH
 
 # Copperplate font — used for chapter headings and running headers
 _copperplate_local  = Path(__file__).parent / "Copperplate.ttc"
@@ -41,8 +53,11 @@ COPPERPLATE_PATH = str(_copperplate_local if _copperplate_local.exists() else _c
 
 # Cover PDF — check next to script and one level up (handles both Colab and local layouts)
 COVER_PDF = next(
-    (p for p in [BOOK_DIR / "1.pdf", Path(__file__).parent / "1.pdf"] if p.exists()),
-    BOOK_DIR / "1.pdf"
+    (p for p in [
+        BOOK_DIR / "1.png",  Path(__file__).parent / "1.png",
+        BOOK_DIR / "1.pdf",  Path(__file__).parent / "1.pdf",
+    ] if p.exists()),
+    BOOK_DIR / "1.png"
 )
 
 # Ornament images — embedded as base64 so Colab needs no extra file access
@@ -70,8 +85,8 @@ def _load_ornament(filename: str) -> str:
     except Exception:
         return base64.standard_b64encode(p.read_bytes()).decode()
 
-ORN_BREAK = _load_ornament("ornament_fancy.png")   # section break (between scenes)
-ORN_FANCY = _load_ornament("ornament_break.png")   # chapter / section opener
+ORN_BREAK = _load_ornament("ornament_break.png")   # section break (between scenes)
+ORN_FANCY = _load_ornament("ornament_fancy.png")   # chapter / section opener
 
 # Text-cleaning helpers — strip [Page N] plus any chapter header that follows it
 _CHAPTER_NAMES = (
@@ -178,8 +193,18 @@ def check_prerequisites():
 # ── COVER IMAGE ───────────────────────────────────────────────────────────────
 
 def render_cover_b64() -> str:
-    """Render 1.pdf page 0 to a JPEG and return as base64 string."""
+    """Render cover to a JPEG base64 string. Handles PDF, PNG, and JPEG source files."""
     try:
+        with open(str(COVER_PDF), "rb") as f:
+            header = f.read(8)
+        is_png  = header[:8] == b"\x89PNG\r\n\x1a\n"
+        is_jpeg = header[:3] == b"\xff\xd8\xff"
+        if is_png or is_jpeg:
+            from PIL import Image
+            img = Image.open(str(COVER_PDF)).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=92)
+            return base64.standard_b64encode(buf.getvalue()).decode("utf-8")
         import fitz
         doc = fitz.open(str(COVER_PDF))
         pix = doc[0].get_pixmap(matrix=fitz.Matrix(2.0, 2.0), colorspace=fitz.csRGB)
@@ -206,7 +231,8 @@ def blocks_to_html(blocks: list, is_uncertain: bool = False) -> str:
         t = blk["type"]
         if t == "chapter_heading":
             opener = f'<div class="orn-opener">{_orn_img(ORN_FANCY, "orn-fancy")}</div>' if ORN_FANCY else ""
-            parts.append(f'{opener}<h2 class="chapter-heading">{escape(blk["text"])}</h2>')
+            chap_id = "chap-" + blk["text"].lower().replace(" ", "-").replace("ó","o").replace("á","a").replace("é","e").replace("í","i").replace("ú","u")
+            parts.append(f'{opener}<h2 class="chapter-heading" id="{chap_id}">{escape(blk["text"])}</h2>')
         elif t == "section_number":
             opener = f'<div class="orn-opener">{_orn_img(ORN_BREAK, "orn-break")}</div>' if ORN_BREAK else ""
             parts.append(f'{opener}<p class="section-number">{escape(blk["text"])}</p>')
@@ -234,15 +260,42 @@ def blocks_to_html(blocks: list, is_uncertain: bool = False) -> str:
 
 
 def front_matter_to_html(front_matter: list) -> str:
-    if not front_matter:
-        return ""
-    parts = ['<div class="front-matter">']
-    for section in front_matter:
-        parts.append('<div class="fm-section">')
-        parts.append(blocks_to_html(section.get("content_blocks", [])))
-        parts.append('</div>')
-    parts.append('</div>')
-    return "\n".join(parts)
+    # front_matter is now empty — metadata and TOC are generated below
+    return ""
+
+
+_TOC_ENTRIES = [
+    ("Gaspar Ilóm",                  "chap-gaspar-ilom",               1),
+    ("Machojón",                     "chap-machojon",                  23),
+    ("The Deer of the Seventh Fire", "chap-the-deer-of-the-seventh-fire", 49),
+    ("Colonel Chalo Godoy",          "chap-colonel-chalo-godoy",       71),
+    ("María Tecún",                  "chap-maria-tecun",              103),
+    ("Coyote-Postman",               "chap-coyote-postman",           163),
+    ("Epilogue",                     "chap-epilogue",                 329),
+]
+
+def metadata_page_html() -> str:
+    return """
+<div class="metadata-page">
+  <p class="meta-place">Guatemala, October 1945<br>Buenos Aires, 17th May 1949</p>
+  <p class="meta-author">MIGUEL ÁNGEL ASTURIAS<br><span class="meta-dates">1899–1974</span></p>
+  <p class="meta-bio">Miguel Ángel Asturias was awarded the 1967 Nobel Prize for Literature.
+  Born in Guatemala, he served in his country's diplomatic service, most recently as ambassador
+  to France. His novels have been admired both for their re-creation of Indian mythology and for
+  their indictment of economic, social, and political privilege.</p>
+</div>"""
+
+def toc_page_html() -> str:
+    rows = ""
+    for title, anchor, page in _TOC_ENTRIES:
+        rows += (f'<tr><td class="toc-title"><a href="#{anchor}">{escape(title)}</a></td>'
+                 f'<td class="toc-dots"></td>'
+                 f'<td class="toc-page"><a href="#{anchor}">{page}</a></td></tr>\n')
+    return f"""
+<div class="toc-page">
+  <h2 class="toc-heading">Contents</h2>
+  <table class="toc-table">{rows}</table>
+</div>"""
 
 
 def pages_to_html(pages: list) -> str:
@@ -309,8 +362,9 @@ def uncertainty_appendix_html(structured: dict) -> str:
 
 
 def build_html(structured: dict, cover_b64: str) -> str:
-    font_src        = f'url("file://{BASKERVILLE_PATH}")'  if Path(BASKERVILLE_PATH).exists()  else "local('Baskerville')"
+    font_src        = f'url("file://{BODY_FONT_PATH}")'    if Path(BODY_FONT_PATH).exists()    else f"local('{BODY_FONT_NAME}')"
     copperplate_src = f'url("file://{COPPERPLATE_PATH}")' if Path(COPPERPLATE_PATH).exists() else "local('Copperplate')"
+    print(f"  Body font: {BODY_FONT_NAME} ({'found' if Path(BODY_FONT_PATH).exists() else 'system fallback'})")
 
     cover_html = ""
     if cover_b64:
@@ -319,13 +373,15 @@ def build_html(structured: dict, cover_b64: str) -> str:
       <img src="data:image/jpeg;base64,{cover_b64}" alt="Cover">
     </div>'''
 
-    fm_html      = front_matter_to_html(structured.get("front_matter", []))
-    body_html    = pages_to_html(structured.get("pages", []))
+    fm_html       = front_matter_to_html(structured.get("front_matter", []))
+    meta_html     = metadata_page_html()
+    toc_html      = toc_page_html()
+    body_html     = pages_to_html(structured.get("pages", []))
     appendix_html = "" if READER_EDITION else uncertainty_appendix_html(structured)
 
     css = f"""
     @font-face {{
-      font-family: 'Baskerville';
+      font-family: '{BODY_FONT_NAME}';
       src: {font_src};
     }}
     @font-face {{
@@ -336,7 +392,7 @@ def build_html(structured: dict, cover_b64: str) -> str:
     /* ── PAGE LAYOUT ── */
     @page {{
       size: 5.5in 8.5in;
-      margin: 0.875in 0.75in 0.875in 0.875in;
+      margin: 0.875in 0.65in 0.875in 0.75in;
       background: #ccc1b0;
     }}
 
@@ -349,7 +405,7 @@ def build_html(structured: dict, cover_b64: str) -> str:
       }}
       @bottom-left {{
         content: counter(page);
-        font-family: 'Baskerville', Baskerville, Georgia, serif;
+        font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
         font-size: 9pt;
         color: #555;
       }}
@@ -365,7 +421,7 @@ def build_html(structured: dict, cover_b64: str) -> str:
       }}
       @bottom-right {{
         content: counter(page);
-        font-family: 'Baskerville', Baskerville, Georgia, serif;
+        font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
         font-size: 9pt;
         color: #555;
         text-align: right;
@@ -374,6 +430,12 @@ def build_html(structured: dict, cover_b64: str) -> str:
 
     @page cover-page {{
       margin: 0;
+      @top-left {{ content: none; }}
+      @top-right {{ content: none; }}
+      @bottom-left {{ content: none; }}
+      @bottom-right {{ content: none; }}
+    }}
+    @page blank-page {{
       @top-left {{ content: none; }}
       @top-right {{ content: none; }}
       @bottom-left {{ content: none; }}
@@ -393,7 +455,91 @@ def build_html(structured: dict, cover_b64: str) -> str:
       object-fit: cover;
     }}
 
-    /* ── FRONT MATTER ── */
+    /* ── METADATA PAGE ── */
+    .metadata-page {{
+      page: blank-page;
+      page-break-before: always;
+      page-break-after: always;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      height: 6.5in;
+    }}
+    .meta-place {{
+      font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
+      font-size: 10pt;
+      color: #555;
+      margin-bottom: 1.5em;
+      text-indent: 0;
+    }}
+    .meta-author {{
+      font-family: 'Copperplate', Copperplate, 'Copperplate Gothic Light', serif;
+      font-size: 13pt;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.3em;
+      text-indent: 0;
+    }}
+    .meta-dates {{
+      font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
+      font-size: 10pt;
+      font-style: normal;
+    }}
+    .meta-bio {{
+      font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
+      font-size: 9.5pt;
+      line-height: 1.5;
+      max-width: 3.8in;
+      margin-top: 1.5em;
+      color: #333;
+      text-indent: 0;
+      text-align: center;
+    }}
+
+    /* ── TABLE OF CONTENTS ── */
+    .toc-page {{
+      page: blank-page;
+      page-break-before: always;
+      page-break-after: always;
+      padding-top: 0.4in;
+    }}
+    .toc-heading {{
+      font-family: 'Copperplate', Copperplate, 'Copperplate Gothic Light', serif;
+      font-size: 13pt;
+      letter-spacing: 0.1em;
+      text-align: center;
+      margin-bottom: 0.3in;
+    }}
+    .toc-table {{
+      width: 100%;
+      border-collapse: collapse;
+    }}
+    .toc-table tr {{
+      line-height: 1.5;
+    }}
+    .toc-title {{
+      font-family: 'EB Garamond', 'Garamond', Georgia, serif;
+      font-size: 12pt;
+      width: 80%;
+    }}
+    .toc-title a, .toc-page a {{
+      color: #111;
+      text-decoration: none;
+    }}
+    .toc-dots {{
+      border-bottom: 1pt dotted #888;
+      width: 100%;
+    }}
+    .toc-page {{
+      font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, Georgia, serif;
+      font-size: 11pt;
+      text-align: right;
+      white-space: nowrap;
+      padding-left: 0.15in;
+    }}
+
+    /* ── FRONT MATTER (legacy, unused) ── */
     .fm-section {{
       page-break-after: always;
       text-align: center;
@@ -401,9 +547,9 @@ def build_html(structured: dict, cover_b64: str) -> str:
     }}
 
     body {{
-      font-family: 'Baskerville', Baskerville, 'Book Antiqua', Georgia, serif;
-      font-size: 10pt;
-      line-height: 1.3;
+      font-family: '{BODY_FONT_NAME}', {BODY_FONT_NAME}, 'Book Antiqua', Georgia, serif;
+      font-size: 11pt;
+      line-height: 1.35;
       color: #111;
       hyphens: auto;
       background-color: #ccc1b0;
@@ -546,6 +692,8 @@ def build_html(structured: dict, cover_b64: str) -> str:
 </head>
 <body>
 {cover_html}
+{meta_html}
+{toc_html}
 {fm_html}
 <div id="body-start">
 {body_html}

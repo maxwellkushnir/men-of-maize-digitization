@@ -1,8 +1,17 @@
 # Blog Notes — Men of Maize
 
+## Publication links
+
+- **GitHub repo:** https://github.com/maxwellkushnir/men-of-maize-digitization
+- **Substack:** https://buildingdiplomacy.substack.com/
+- **Blog post:** *(link to add when published)*
+- **PDF download:** *(link to add — Google Drive or direct)*
+
+---
+
 ## Stat cards (top of blog)
 
-| 4 | 18 | 95% |
+| 4 | 20 | 95% |
 |---|----|----|
 | AI models used | PDF passes | Agreement rate between independent models |
 

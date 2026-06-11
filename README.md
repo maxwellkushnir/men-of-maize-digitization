@@ -6,7 +6,7 @@ A pipeline to digitize *Men of Maize* by Miguel Ángel Asturias (1975 Delacorte/
 
 ---
 
-| **4** | **18** | **95%** |
+| **4** | **20** | **95%** |
 |:---:|:---:|:---:|
 | AI models used | PDF passes | Agreement between independent models |
 
@@ -14,7 +14,7 @@ A pipeline to digitize *Men of Maize* by Miguel Ángel Asturias (1975 Delacorte/
 
 ## What's in this repo
 
-- **Pipeline scripts** (`take2/`) — numbered 01–21, covering every step from raw image to finished PDF
+- **Pipeline scripts** (`take2/`) — numbered 01–24, covering every step from raw image to finished PDF
 - **Project docs** — methodology, QA results, run logs, and divergence analysis
 - **Blog notes** — raw notes for the accompanying blog post
 
@@ -42,6 +42,9 @@ A pipeline to digitize *Men of Maize* by Miguel Ángel Asturias (1975 Delacorte/
 | `19_openai_transcribe.py` | GPT full re-transcription of affected spreads |
 | `20_deduplicate_pages.py` | Cross-page deduplication |
 | `21_mark_uncertainties.py` | Mark uncertain pages in JSON for ※ flagging in PDF |
+| `22_apply_pass18_corrections.py` | Pass 18: 52 source-confirmed text corrections |
+| `23_apply_pass18b_corrections.py` | Pass 18b: curly-quote and follow-up corrections |
+| `24_insert_gaspar_transcription.py` | Insert manual transcription of the GASPAR ILÓM opening |
 
 ## Project docs
 
@@ -54,4 +57,6 @@ A pipeline to digitize *Men of Maize* by Miguel Ángel Asturias (1975 Delacorte/
 
 ---
 
-> **Status:** One final PDF pass remaining before publication.
+> **Status:** Complete. The final PDF (`men_of_maize-20.pdf`) is built — 20 build passes, 18 correction passes, four AI models cross-checking each other against 175 photographed spreads.
+>
+> The finished PDF and the assembled text are not included in this repo (the book is under copyright); the repo contains the pipeline and methodology only.

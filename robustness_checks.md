@@ -25,11 +25,87 @@
 ---
 
 **Purpose:** Verify that the assembled text (`men_of_maize_clean.txt`) is accurate before publishing the PDF.  
-**Current PDF:** `take2/PDFs/men_of_maize-14.pdf` (272 pages, all corrections applied, ※ markers + appendix)
+**Current PDF:** `take2/PDFs/men_of_maize-20.pdf` — **FINAL. Ready to publish.**
+
+---
+
+## ▶ SESSION 2026-06-08/09 — COMPLETE
+
+**PDF-20 is the final published version.** All text correction, layout, and typography work is done.
+
+### What happened this session
+
+**Pass 18 — 52 source-confirmed text corrections (2026-06-08)**
+- Read PDF-17, identified 52 garbled passages across all chapters
+- Cross-checked every glitch against 4 raw sources (Qwen, Mistral, OpenAI, Claude base)
+- Scripts `22_apply_pass18_corrections.py` + `23_apply_pass18b_corrections.py` applied all 52 fixes to both `men_of_maize_clean.txt` and `men_of_maize_structured.json`
+- Deleted the duplicate ~1.5-page Section XV passage in Coyote-Postman
+- Backed up as `men_of_maize_clean_PREPASS18.txt` / `men_of_maize_structured_PREPASS18.json`
+- **PDF-18 built:** all 52 corrections applied
+
+**PDF restructure (2026-06-09)**
+- Removed garbled front matter and trailing epilogue metadata from JSON
+- Added metadata page: Guatemala/Buenos Aires dates + author bio (MIGUEL ÁNGEL ASTURIAS, 1899–1974)
+- Added single-page linked TOC (chapter titles + page numbers are clickable PDF links)
+- New page order: Cover → Metadata → TOC → Book content → Epilogue (ends at "ants, ants, ants, ants …")
+- Epilogue trailing garbage (pages 337+, garbled author bio) removed from JSON
+- `03_build_pdf.py` updated with `metadata_page_html()` and `toc_page_html()` functions
+
+**GASPAR ILÓM Chapter I — manual transcription inserted (2026-06-09)**
+- User transcribed first 7 spreads of `2-25.pdf` (book pages 1–14) as `Part I Chapter 1 transcribed.txt`
+- Script `24_insert_gaspar_transcription.py` replaced garbled JSON pages 1–14 with clean transcription
+- Also restored missing Section II opener: "The sun let down its hair…" (was absent from JSON)
+- Transcript covers: Section I (all) → ornament break → Colonel Godoy/serenade/Vaca Manuela → big ornament break → Section II heading → "The sun let down its hair…"
+
+**Typography & layout (2026-06-09)**
+- Body font switched from Baskerville to **EB Garamond** (`apt-get install fonts-ebgaramond` in Colab)
+- Font size: 10pt → 11pt (EB Garamond runs smaller)
+- Ornaments swapped: chapter openers now use `ornament_fancy.png`; section breaks use `ornament_break.png`
+- Margins widened ~10%: `0.875in 0.75in 0.875in 0.875in` → `0.875in 0.65in 0.875in 0.75in`
+- **PDF-19 built**
+
+**417 paragraph merges — final text fix (2026-06-09)**
+- Discovered 530 paragraph blocks in the JSON starting with lowercase (mid-sentence splits from original Mistral transcription's spread boundaries)
+- Merged 417 of them into the preceding paragraph block (JSON-level fix, not just rendering)
+- Backup: `men_of_maize_structured_PREMERGE.json`
+- **PDF-20 built — final**
+
+### Final state
+
+| Item | Status |
+|------|--------|
+| Text corrections (52 glitches) | ✅ All applied |
+| Duplicate Section XV | ✅ Deleted |
+| GASPAR ILÓM opening (pp. 1–14) | ✅ Manual transcription inserted |
+| Mid-sentence paragraph splits | ✅ 417 merged |
+| Front matter restructure | ✅ Metadata + linked TOC |
+| Epilogue trimmed | ✅ Ends at "ants, ants, ants, ants …" |
+| Body font | ✅ EB Garamond 11pt |
+| Ornaments swapped | ✅ |
+| Margins widened 10% | ✅ |
+| `[illegible]` placeholders | ⚠ Remain at book pp. 52, 226, 314 |
+| ※ uncertainty markers | ✅ Removed (READER_EDITION = True) |
+
+### Key files (final state)
+- **PDF:** `take2/PDFs/men_of_maize-20.pdf`
+- **JSON:** `take2/output/men_of_maize_structured.json` (265 pages after restructure)
+- **Build script:** `take2/03_build_pdf.py` (EB Garamond, linked TOC, metadata page)
+- **Transcription:** `Raw Data (to use)/Part I Chapter 1 transcribed.txt`
+- **Scripts added this session:** `22_`, `23_`, `24_apply_pass18*`, `24_insert_gaspar_transcription.py`
 
 ---
 
 ## ▶ RESUME HERE (next session)
+
+**Project is COMPLETE for publishing.** The only remaining known imperfections:
+- `[illegible]` at book pp. 52, 226, 314 (need original photos to verify)
+- New cover: `1.png` (the cover image used for PDF-20)
+
+If doing a future revision, start by reading this file and `first_draft_pass.md`.
+
+---
+
+## ▶ PREVIOUS SESSION NOTES (2026-06-01)
 
 **PDF-14 built (2026-06-01). 272 pages, 1.7 MB. All correction passes applied.**
 

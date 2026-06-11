@@ -1,350 +1,452 @@
-# Code Review: 20_deduplicate_pages.py
+# Code Review: 03_build_pdf.py
 
-## Code Review: `20_deduplicate_pages.py`
+## Code Review of `03_build_pdf.py`
 
-### Overview
-The script performs cross-page deduplication in two passes: boundary overlap (Pass 1) and interior block-level overlap (Pass 2). The logic is fairly robust but contains several bugs, inefficiencies, and edge-case problems.
+### Critical Bugs / Incorrect Behaviour
 
----
+1. **`_INLINE_HEADER` pattern (line 78–80) strips prose**  
+   The regex matches any occurrence of chapter names (e.g. `GASPAR ILÓM`, `COYOTE-POSTMAN`) anywhere in the text and silently removes them. This corrupts dialogue, character references, and narrative passages that legitimately include these names.  
+   *Example:* A paragraph beginning “Gaspar Ilóm walked slowly…” would lose “Gaspar Ilóm”.
 
-### Bug – Inconsistent tokenisation (lines 92–93 vs 139–140)
-`find_boundary_overlap` uses `tokenise()` (regex, lowercased) to get word lists.  
-`trim_from_word` uses `blk["text"].split()` (whitespace splitting, original case/punctuation).  
-These two word-counting methods produce **different results** when punctuation or apostrophes are present (e.g., `"don't"` vs `"don't."`). This causes word offsets computed in Pass 1 to **misalign** with the actual words that should be removed, potentially corrupting the page content.
+2. **`_PAGE_MARKER` pattern (lines 74–76) can also remove chapter names from prose**  
+   Though less likely (it requires a preceding `[Page…]` marker), the pattern is still applied with `re.sub` to all text, potentially matching and erasing chapter‑name phrases that happen to appear after a page marker (e.g. `[Page 42] The men of maize were…`).
 
-**Fix**: Use the same splitting method for both detection and trimming. Either always use `split()` (simpler) or always use the regex tokeniser and track original string indices.
+3. **`COVER_PDF` is defined twice (lines 32 and 60)**  
+   The first assignment (`COVER_PDF = BOOK_DIR / "1.pdf"`) is never used because the variable is immediately redefined later. While not a runtime bug, it’s dead code and may confuse maintainers.
 
-### Logic bug – Ratio calculation (line 106)
-```python
-ratio = match_len / min(len(tail_w[-200:]), len(head_w[:200]))
-```
-`match_len` can legally exceed both `len(tail_w[-200:])` and `len(head_w[:200])` (since the match is found inside the first 400 words of head). This can produce `ratio > 1.0`, which is meaninglessly large. The denominator should instead be the **length of the overlapping region** after alignment (or simply cap at 1.0). The current formula may pass the 0.30 threshold even for tiny overlaps when the denominator is small.
+4. **No handling for missing fonts**  
+   `BODY_FONT_PATH` is set to a string (even if the file doesn’t exist). The CSS `@font-face` will then reference a non‑existent file. WeasyPrint may fall back, but warnings will be emitted and the fallback chain may not be correct.
 
-**Fix**: Use `min(len(tail_sample), len(head_sample))` or the overlapping length derived from the match positions.
+5. **`_merge_page_fragments()` can merge paragraphs incorrectly**  
+   The heuristic `not _SENT_END.search(pt) or (nt and nt[0].islower())` treats any paragraph that doesn’t end with sentence punctuation as part of the next paragraph. This can merge paragraphs that are legitimately separate (e.g. after a colon, or a line‑break mid‑sentence). The check `nt[0].islower()` is useful but vulnerable to numbers or symbols at the start of the next paragraph.
 
-### Edge case – Short pages (lines 86–89)
-`tail_sample = tail_words[-400:]` works for short pages, but `find_boundary_overlap` then checks `a + size < len(tail_sample) - 120`. If the entire tail is ≤120 words, no match can satisfy this condition, causing all boundary overlaps to be missed.
+6. **`render_cover_b64()` may fail silently**  
+   If the cover file exists but cannot be opened (permission, corrupt file), the function returns an empty string and prints a warning. The cover page is then omitted, but no alternative is provided.
 
-**Fix**: Adjust the condition to require the match to reach within 120 words of the **actual** tail end, not the sample end. Or only enforce when the tail is longer than 120.
+### Inefficiencies
 
-### Inefficiency – Pass 2 block comparison (lines 146–159)
-`find_duplicate_blocks` builds a flat list of all prior paragraph texts every time it’s called. For each new page it recomputes this list, even though the prior pages are static. Additionally, it computes set‑based Jaccard similarity from scratch for each pair of blocks, which is O(L₁+L₂) per comparison. For large data this can be slow.
+- **Base‑64 encoding of ornaments at import time** – `_load_ornament` is called twice at module load, loading and encoding PNG files even if they are not used (e.g. when `ORN_BREAK` or `ORN_FANCY` are empty). This can be deferred to when the HTML is built.
+- **Repeated `re.sub` on every paragraph** – The `_clean()` function runs three regex substitutions on every paragraph block, including the expensive `_INLINE_HEADER` pattern. This is unnecessary if the JSON already has clean text.
+- **Whole‑HTML string in memory** – The entire HTML is built as a single string. For a book of ~300 pages this is acceptable, but for larger works streaming could be considered.
 
-**Inefficiency**: Store pre‑computed sets or use a more efficient indexing (e.g., TF‑IDF). However, for the typical number of pages in a book this is acceptable.
+### Edge Cases / Robustness
 
-### Possible false positive in Pass 2 (line 132)
-`block_sim` uses Jaccard on word sets. Short blocks with only a few words can easily exceed 0.72 similarity by chance (e.g., a block containing only `"the"` and `"and"`). While `P2_MIN_BLOCK_WORDS = 15` mitigates this, it’s still possible for longer blocks that share mostly common words.
+- **Empty JSON** – no `pages` or `metadata` key: `pages_to_html()` will return empty body; the PDF will be created with only cover, metadata, and TOC.
+- **Unicode normalisation** – no NFC/NFD handling in text cleaning; accents in chapter names (ILÓM) are matched case‑insensitively but the source may have composed or decomposed forms.
+- **`@page :left` / `@page :right` may interfere with blank pages** – The metadata and TOC pages use `page: blank-page` with no running headers, but the `@page :left` / `:right` rules might still apply if the page counter causes them to be on the “wrong” side. Using `page: cover-page` and `page: blank-page` properly scopes them.
+- **No fallback for missing ornament files** – If the image files don’t exist, `OR BREAK` or `OR FANCY` become empty strings, and the `<img>` tags are omitted. The CSS then may produce layout gaps.
 
-**Improvement**: Use a more robust similarity measure, e.g., longest common subsequence ratio, or add a check for the absolute number of shared words.
+### Minor Issues
 
-### Missing check – Empty match removal (lines 50–52)
-After `find_boundary_overlap`, `head_start` and `match_len` could be zero if no valid match exists. The code correctly checks `match_len >= P1_MIN_WORDS`, but if `match_len` is zero, `trim_from_word` would be called with `n_words=0`, which is harmless. However, an early return is clearer.
-
-### Style / Maintainability
-- Hard‑coded magic numbers (120, 400, 200) scattered throughout.
-- `blocks_text()` rebuilds the full text each time it’s called; could be memoised.
-- `continue` after Pass 1 skips Pass 2 entirely for that page pair. This is acceptable, but if Pass 1 incorrectly trims, there’s no second chance.
-
-### Summary of key bugs
-1. **Tokenisation mismatch** between detection and trimming (most critical).
-2. **Ratio denominator** can cause false positives (minor).
-3. **Short‑page edge case** in Pass 1 may miss legitimate overlaps.
+- **Typo in function docstring:** “base64” instead of “base64” (line 108).
+- **Unused imports:** `import json as _json` inside `uncertainty_appendix_html()` shadows the top‑level `json` import; but `json` is not used elsewhere in that function – it only uses `_json`.
+- **Line 147:** `first_para_done` is assigned but `is_uncertain` is passed as a parameter; the variable name is okay but it could be clearer (e.g. `first_uncertain_para`).
+- **Hard‑coded `_TOC_ENTRIES`** with fixed page numbers – does not reflect actual page numbers generated by the PDF. The original code likely expects page numbers to be set manually; a dynamic TOC would be more robust.
 
 ---
 
-## Independent Implementation
+## Independent Implementation of the Same Task
 
-Below is a rewritten version that fixes the main bugs, keeps the same two‑pass strategy, and improves consistency.
+Below is a clean, robust, and secure version of the PDF builder. It addresses the critical bugs and maintains the same visual design.
 
 ```python
 #!/usr/bin/env python3
 """
-Cross-page deduplication for Men of Maize.
-Two passes: boundary overlap (simple) and interior block overlap (complex).
-Usage: python3 deduplicate.py [--dry-run]
+Men of Maize — PDF Builder (Improved)
+Reads men_of_maize_structured.json and creates a typeset PDF using WeasyPrint.
+
+Usage:
+    python3 build_pdf_clean.py
 """
 
+import base64
+import io
 import json
 import re
 import sys
-from difflib import SequenceMatcher
+from html import escape
 from pathlib import Path
 
-OUTPUT_DIR = Path(__file__).parent / "output"
-JSON_PATH = OUTPUT_DIR / "men_of_maize_structured.json"
-BACKUP = OUTPUT_DIR / "men_of_maize_structured_PREDEDUP.json"
+# Config ----------------------------------------------------------------
+READER_EDITION = True        # True: remove ※ markers & uncertainty appendix
+OUTPUT_DIR     = Path(__file__).parent / "output"
+BOOK_DIR       = Path(__file__).parent.parent
+STRUCTURED_JSON = OUTPUT_DIR / "men_of_maize_structured.json"
+OUTPUT_PDF      = OUTPUT_DIR / "men_of_maize.pdf"
 
-DRY_RUN = "--dry-run" in sys.argv
+# Font paths (local then system fallback) --------------------------------
+_EBGARAMOND_CANDIDATES = [
+    Path(__file__).parent / "EBGaramond-Regular.ttf",
+    Path("/usr/share/fonts/truetype/ebgaramond/EBGaramond-Regular.ttf"),
+    Path("/usr/share/fonts/truetype/ebgaramond/EBGaramond12-Regular.ttf"),
+]
+BASKERVILLE_PATH = (
+    Path(__file__).parent / "Baskerville.ttc"
+    if (Path(__file__).parent / "Baskerville.ttc").exists()
+    else Path("/System/Library/Fonts/Supplemental/Baskerville.ttc")
+)
+COPPERPLATE_PATH = (
+    Path(__file__).parent / "Copperplate.ttc"
+    if (Path(__file__).parent / "Copperplate.ttc").exists()
+    else Path("/System/Library/Fonts/Supplemental/Copperplate.ttc")
+)
+EBGARAMOND_PATH = next((p for p in _EBGARAMOND_CANDIDATES if p.exists()), None)
+BODY_FONT_NAME = "EB Garamond" if EBGARAMOND_PATH else "Baskerville"
+BODY_FONT_SRC  = f"url('file://{EBGARAMOND_PATH}')" if EBGARAMOND_PATH else f"local('{BODY_FONT_NAME}')"
+COPPERPLATE_SRC = (
+    f"url('file://{COPPERPLATE_PATH}')" if COPPERPLATE_PATH.exists() else "local('Copperplate')"
+)
 
-# Pass 1 thresholds
-P1_MIN_WORDS = 5
-P1_MAX_HEAD_POS = 80
-P1_MIN_RATIO = 0.30
-P1_TAIL_LOOKBACK = 400
-P1_HEAD_LOOKAHEAD = 400
-P1_TAIL_MARGIN = 120  # match must be within this many words of tail end
+# Ornament images (lazy load) -------------------------------------------
+_ornament_cache = {}
 
-# Pass 2 thresholds
-P2_MIN_BLOCK_WORDS = 15
-P2_MIN_SIM = 0.72
-P2_LOOKBACK = 3
+def _load_ornament(filename: str) -> str:
+    if filename not in _ornament_cache:
+        p = Path(__file__).parent / filename
+        if not p.exists():
+            _ornament_cache[filename] = ""
+        else:
+            try:
+                from PIL import Image
+                img = Image.open(p).convert("RGB")
+                gray = img.convert("L")
+                thresh = gray.point(lambda x: 255 if x < 200 else 0)
+                bbox = thresh.getbbox()
+                if bbox:
+                    pad = 6
+                    w, h = img.size
+                    bbox = (
+                        max(0, bbox[0] - pad), max(0, bbox[1] - pad),
+                        min(w, bbox[2] + pad), min(h, bbox[3] + pad)
+                    )
+                    img = img.crop(bbox)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                _ornament_cache[filename] = base64.b64encode(buf.getvalue()).decode()
+            except (ImportError, Exception):
+                _ornament_cache[filename] = base64.b64encode(p.read_bytes()).decode()
+    return _ornament_cache[filename]
 
+ORN_BREAK = _load_ornament("ornament_break.png")
+ORN_FANCY = _load_ornament("ornament_fancy.png")
 
-def tokenise(text: str) -> list[str]:
-    """Return list of lowercase words, stripping punctuation (keeps apostrophes/hyphens)."""
-    return re.findall(r"[a-zA-ZÀ-ÿ''-]+", text.lower())
+# Cover image detection -------------------------------------------------
+COVER_CANDIDATES = [
+    BOOK_DIR / "1.png",
+    Path(__file__).parent / "1.png",
+    BOOK_DIR / "1.pdf",
+    Path(__file__).parent / "1.pdf",
+]
+COVER_PATH = next((p for p in COVER_CANDIDATES if p.exists()), None)
 
+# Regex for removing only page markers (aggressive header removal removed) -
+_PAGE_MARKER_RE = re.compile(r'\[Page(?:\s+(?:LEFT|RIGHT))?\s*\d*\]\s*', re.IGNORECASE)
+_ELLIPSIS_BRACKET_RE = re.compile(r'\[\s*[.]{2,}\s*\]|\[\s*…\s*\]')
+_ORN_CLASSIFIER_RE = re.compile(
+    r'^\s*(?:'
+    r'\[?◆\]?|\*{3}|◆|decorative|ornamental|ornament'
+    r')\s*$',
+    re.IGNORECASE
+)
 
-def word_split(text: str) -> list[str]:
-    """Split text into words using whitespace (preserves punctuation)."""
-    return text.split()
+def clean_text(text: str, strip_headers: bool = True) -> str:
+    """Remove [Page N] markers and normalise ellipsis brackets."""
+    text = _PAGE_MARKER_RE.sub("", text)
+    text = _ELLIPSIS_BRACKET_RE.sub("[illegible]", text)
+    text = re.sub(r'  +', ' ', text)
+    return text.strip()
 
-
-def blocks_text(blocks: list) -> str:
-    return " ".join(b.get("text", "") for b in blocks if b.get("type") == "paragraph")
-
-
-def block_sim_set(text_a: str, text_b: str) -> float:
-    """Jaccard similarity on token sets."""
-    a_set = set(tokenise(text_a))
-    b_set = set(tokenise(text_b))
-    if not a_set or not b_set:
-        return 0.0
-    return len(a_set & b_set) / max(len(a_set), len(b_set))
-
-
-# ── Pass 1 helper ─────────────────────────────────────────────────────────────
-
-def find_boundary_overlap(tail_blocks: list, head_blocks: list) -> tuple[int, int]:
-    """
-    Return (word_offset_in_head, match_length_in_words) for boundary overlap.
-    Uses whitespace-split words for consistency with trimming.
-    """
-    tail_text = blocks_text(tail_blocks)
-    head_text = blocks_text(head_blocks)
-    tail_words = word_split(tail_text)
-    head_words = word_split(head_text)
-
-    if len(tail_words) < P1_MIN_WORDS or len(head_words) < P1_MIN_WORDS:
-        return 0, 0
-
-    # Samples from the tail end and head start
-    tail_sample = tail_words[-P1_TAIL_LOOKBACK:]
-    head_sample = head_words[:P1_HEAD_LOOKAHEAD]
-
-    sm = SequenceMatcher(None, tail_sample, head_sample, autojunk=False)
-    best_len = 0
-    best_head_start = 0
-    for a, b, size in sm.get_matching_blocks():
-        if size < P1_MIN_WORDS:
-            continue
-        if b > P1_MAX_HEAD_POS:
-            continue
-        # Ensure match reaches near the real end of the tail
-        # a is offset in tail_sample; we require that a+size touches the last P1_TAIL_MARGIN words
-        # of the *original* tail (not just the sample).
-        real_tail_start = max(0, len(tail_words) - P1_TAIL_LOOKBACK)
-        if a + size < (len(tail_sample) - P1_TAIL_MARGIN):
-            continue
-        if size > best_len:
-            best_len = size
-            best_head_start = b  # b is offset in head_sample, which equals offset in head_words
-    return best_head_start, best_len
-
-
-def trim_words_from_blocks(blocks: list, word_offset: int, n_words: int) -> list:
-    """
-    Remove n_words from the paragraph blocks, starting at word_offset.
-    Works on whitespace-split words (consistent with find_boundary_overlap).
-    """
-    if n_words <= 0:
-        return blocks
-
-    # Build a list of (block_index, start_word_index, end_word_index) for paragraphs
-    para_info = []
-    current = 0
-    for idx, blk in enumerate(blocks):
-        if blk.get("type") != "paragraph":
-            continue
-        words = word_split(blk.get("text", ""))
-        para_info.append((idx, current, current + len(words)))
-        current += len(words)
-
-    total_words = current
-    if word_offset >= total_words or word_offset + n_words <= 0:
-        return blocks
-
-    remove_start = max(0, word_offset)
-    remove_end = min(total_words, word_offset + n_words)
-
-    new_blocks = []
-    for blk in blocks:
-        if blk.get("type") != "paragraph":
-            new_blocks.append(blk)
-            continue
-
-        # Find where this block sits in the word stream
-        blk_words = word_split(blk.get("text", ""))
-        # We'll iterate para_info to get offsets (simple but O(n^2); fine for few blocks)
-        start = None
-        end = None
-        for idx, s, e in para_info:
-            if idx == blk["id"] if "id" in blk else False:
-                # We need a reliable key; use object identity or position
-                pass
-        # Simpler: scan sequentially (assuming order preserved)
-        # Since we rebuild sequentially, we can use a cumulative counter.
-
-    # This approach becomes complex. For simplicity, we rebuild text,
-    # trim, then re-assign to a single paragraph block (losing block structure).
-    # Given the original code's block-preserving logic, we replicate that but fix the split.
-    # Below is the corrected version using the same splitter:
-
+def process_blocks(blocks: list) -> list:
+    """Clean text and convert ornament‑only paragraphs to section breaks."""
     result = []
-    current = 0
-    end_pos = word_offset + n_words
     for blk in blocks:
-        if blk.get("type") != "paragraph":
+        if blk["type"] == "paragraph":
+            text = clean_text(blk["text"])
+            if not text:
+                continue
+            if _ORN_CLASSIFIER_RE.match(text):
+                result.append({"type": "section_break"})
+                continue
+            result.append({"type": "paragraph", "text": text})
+        else:
             result.append(blk)
-            continue
-        words = word_split(blk["text"])
-        blk_start = current
-        blk_end = current + len(words)
-        current = blk_end
-
-        if blk_end <= word_offset or blk_start >= end_pos:
-            result.append(blk)
-        elif blk_start < word_offset and blk_end > end_pos:
-            kept = words[:word_offset - blk_start] + words[end_pos - blk_start:]
-            if kept:
-                result.append({**blk, "text": " ".join(kept)})
-        elif blk_start < word_offset:
-            kept = words[:word_offset - blk_start]
-            if kept:
-                result.append({**blk, "text": " ".join(kept)})
-        elif blk_end > end_pos:
-            kept = words[end_pos - blk_start:]
-            if kept:
-                result.append({**blk, "text": " ".join(kept)})
-        # else entirely removed
     return result
 
+# Prerequisites ----------------------------------------------------------
+def check_prerequisites():
+    try:
+        import weasyprint
+    except ImportError:
+        print("ERROR: WeasyPrint not installed. Run: pip install weasyprint")
+        sys.exit(1)
+    if not STRUCTURED_JSON.exists():
+        print(f"ERROR: {STRUCTURED_JSON} not found. Run 02_assemble.py first.")
+        sys.exit(1)
 
-# ── Pass 2 helper ─────────────────────────────────────────────────────────────
+# Cover rendering --------------------------------------------------------
+def render_cover_b64() -> str:
+    if not COVER_PATH:
+        return ""
+    try:
+        with open(COVER_PATH, "rb") as f:
+            header = f.read(8)
+        is_png  = header[:8] == b"\x89PNG\r\n\x1a\n"
+        is_jpeg = header[:3] == b"\xff\xd8\xff"
+        if is_png or is_jpeg:
+            from PIL import Image
+            img = Image.open(COVER_PATH).convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=92)
+            return base64.b64encode(buf.getvalue()).decode()
+        # Assume PDF
+        import fitz
+        doc = fitz.open(COVER_PATH)
+        pix = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csRGB)
+        jpeg = pix.tobytes("jpeg")
+        doc.close()
+        return base64.b64encode(jpeg).decode()
+    except Exception as e:
+        print(f"  WARNING: Could not render cover: {e}")
+        return ""
 
-def find_duplicate_blocks(prior_pages_blocks: list[list], page_b_blocks: list) -> list[int]:
-    """Return indices of paragraph blocks in page_b_blocks that are too similar to any block from prior pages."""
-    # Build set of word sets for prior paragraphs (precomputed once per call)
-    prior_sets = []
-    for blocks in prior_pages_blocks:
-        for blk in blocks:
-            if blk.get("type") == "paragraph":
-                text = blk.get("text", "")
-                words = tokenise(text)
-                if len(words) >= P2_MIN_BLOCK_WORDS:
-                    prior_sets.append(set(words))
+# HTML generation --------------------------------------------------------
+def orn_img(b64: str, css_class: str) -> str:
+    if not b64:
+        return ""
+    return f'<img src="data:image/png;base64,{b64}" class="{css_class}" alt="">'
 
-    dup_indices = []
-    for j, blk in enumerate(page_b_blocks):
-        if blk.get("type") != "paragraph":
-            continue
-        b_words = tokenise(blk.get("text", ""))
-        if len(b_words) < P2_MIN_BLOCK_WORDS:
-            continue
-        b_set = set(b_words)
-        for a_set in prior_sets:
-            intersection = a_set & b_set
-            sim = len(intersection) / max(len(a_set), len(b_set))
-            if sim >= P2_MIN_SIM:
-                dup_indices.append(j)
-                break
-    return dup_indices
+def blocks_to_html(blocks: list, uncertain_start: bool = False) -> str:
+    parts = []
+    first_para = True
+    blocks = process_blocks(blocks)
+    for blk in blocks:
+        t = blk["type"]
+        if t == "chapter_heading":
+            opener = f'<div class="orn-opener">{orn_img(ORN_FANCY, "orn-fancy")}</div>' if ORN_FANCY else ""
+            chap_id = "chap-" + blk["text"].lower().replace(" ", "-")
+            chap_id = re.sub(r'[^a-z0-9-]', '', chap_id)
+            parts.append(f'{opener}<h2 class="chapter-heading" id="{chap_id}">{escape(blk["text"])}</h2>')
+        elif t == "section_number":
+            opener = f'<div class="orn-opener">{orn_img(ORN_BREAK, "orn-break")}</div>' if ORN_BREAK else ""
+            parts.append(f'{opener}<p class="section-number">{escape(blk["text"])}</p>')
+        elif t == "section_break":
+            inner = orn_img(ORN_BREAK, "orn-break") or "◆"
+            parts.append(f'<div class="section-break">{inner}</div>')
+        elif t == "paragraph":
+            text = escape(blk["text"])
+            if uncertain_start and first_para and not READER_EDITION:
+                parts.append(f'<p class="uncertain-page">{text}</p>')
+            else:
+                parts.append(f'<p>{text}</p>')
+            first_para = False
+        elif t == "italic_block":
+            parts.append(f'<p class="italic-block"><em>{escape(blk["text"])}</em></p>')
+        elif t == "needs_review":
+            pdf  = escape(blk.get("source_pdf", "?"))
+            num  = escape(blk.get("spread_number", "?"))
+            parts.append(
+                f'<div class="needs-review">'
+                f'[Pages missing — {pdf} spread {num} requires manual transcription]'
+                f'</div>'
+            )
+    return "\n".join(parts)
 
+# TOC and metadata (statically defined) ----------------------------------
+TOC_ENTRIES = [
+    ("Gaspar Ilóm",                  1),
+    ("Machojón",                     23),
+    ("The Deer of the Seventh Fire", 49),
+    ("Colonel Chalo Godoy",          71),
+    ("María Tecún",                 103),
+    ("Coyote-Postman",              163),
+    ("Epilogue",                    329),
+]
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+def metadata_html() -> str:
+    return '''<div class="metadata-page">
+  <p class="meta-place">Guatemala, October 1945<br>Buenos Aires, 17th May 1949</p>
+  <p class="meta-author">MIGUEL ÁNGEL ASTURIAS<br><span class="meta-dates">1899–1974</span></p>
+  <p class="meta-bio">Miguel Ángel Asturias was awarded the 1967 Nobel Prize for Literature.
+  Born in Guatemala, he served in his country's diplomatic service, most recently as ambassador
+  to France. His novels have been admired both for their re-creation of Indian mythology and for
+  their indictment of economic, social, and political privilege.</p>
+</div>'''
 
+def toc_html() -> str:
+    rows = ""
+    for title, page in TOC_ENTRIES:
+        chap_id = "chap-" + title.lower().replace(" ", "-").replace("ó", "o").replace("í", "i").replace("ú", "u")
+        rows += f'<tr><td class="toc-title"><a href="#{chap_id}">{escape(title)}</a></td><td class="toc-page">{page}</td></tr>\n'
+    return f'<div class="toc-page"><h2 class="toc-heading">Contents</h2><table class="toc-table">{rows}</table></div>'
+
+# Uncertainty appendix ---------------------------------------------------
+def uncertainty_appendix(structured: dict) -> str:
+    if READER_EDITION:
+        return ""
+    uncertain = []
+    for pg in structured.get("pages", []):
+        if pg.get("_uncertain"):
+            spans = pg.get("_uncertain_spans", [])
+            uncertain.append((pg["page_number"], spans))
+    if not uncertain:
+        return ""
+    rows = ""
+    for pn, spans in sorted(uncertain):
+        for sp in spans:
+            q = escape(sp.get("q", ""))
+            m = escape(sp.get("m", ""))
+            b = escape(sp.get("base", "—"))
+            c = escape(sp.get("cat", ""))
+            rows += f'<tr><td>{pn}</td><td style="color:#1565c0">{q}</td><td style="color:#2e7d32">{m}</td><td style="color:#555">{b}</td><td style="font-size:8pt;color:#888">{c}</td></tr>\n'
+    pages_list = ", ".join(str(pn) for pn, _ in sorted(uncertain))
+    return f'''<div class="appendix-page">
+  <h2 class="appendix-heading">Note on Textual Uncertainties</h2>
+  <p class="appendix-intro">This edition was prepared from photographs of the 1975 Delacorte/Seymour Lawrence
+    first US edition using multiple independent AI transcription models. The following {len(uncertain)} pages
+    contain passages where all models disagreed. They are marked with a small <span class="unc-symbol">※</span>.</p>
+  <p class="appendix-pages"><strong>Affected pages:</strong> {pages_list}</p>
+  <table class="appendix-table">
+    <thead><tr><th>Page</th><th style="color:#1565c0">Qwen</th><th style="color:#2e7d32">Mistral</th><th>Current</th><th>Type</th></tr></thead>
+    <tbody>{rows}</tbody></table></div>'''
+
+# Build full HTML --------------------------------------------------------
+def build_html(structured: dict, cover_b64: str) -> str:
+    cover = ""
+    if cover_b64:
+        cover = f'<div class="cover-page"><img src="data:image/jpeg;base64,{cover_b64}" alt="Cover"></div>'
+
+    body_parts = []
+    for pg in structured.get("pages", []):
+        body_parts.append(blocks_to_html(pg["content_blocks"], pg.get("_uncertain", False)))
+    body = "\n".join(body_parts)
+
+    appendix = uncertainty_appendix(structured)
+
+    css = f"""
+    @font-face {{
+        font-family: '{BODY_FONT_NAME}';
+        src: {BODY_FONT_SRC};
+    }}
+    @font-face {{
+        font-family: 'Copperplate';
+        src: {COPPERPLATE_SRC};
+    }}
+    @page {{
+        size: 5.5in 8.5in;
+        margin: 0.875in 0.65in 0.875in 0.75in;
+        background: #ccc1b0;
+    }}
+    @page :left {{
+        @top-left {{
+            content: "MEN OF MAIZE";
+            font-family: 'Copperplate', serif;
+            font-size: 8pt; color: #444;
+        }}
+        @bottom-left {{
+            content: counter(page);
+            font-family: '{BODY_FONT_NAME}', serif;
+            font-size: 9pt; color: #555;
+        }}
+    }}
+    @page :right {{
+        @top-right {{
+            content: string(chapter-running-header);
+            font-family: 'Copperplate', serif;
+            font-size: 8pt; color: #444;
+            text-align: right;
+        }}
+        @bottom-right {{
+            content: counter(page);
+            font-family: '{BODY_FONT_NAME}', serif;
+            font-size: 9pt; color: #555;
+            text-align: right;
+        }}
+    }}
+    @page cover-page {{ margin:0; @top-left {{ content:none; }} @top-right {{ content:none; }} @bottom-left {{ content:none; }} @bottom-right {{ content:none; }} }}
+    @page blank-page {{ @top-left {{ content:none; }} @top-right {{ content:none; }} @bottom-left {{ content:none; }} @bottom-right {{ content:none; }} }}
+    body {{
+        font-family: '{BODY_FONT_NAME}', 'Book Antiqua', Georgia, serif;
+        font-size: 11pt; line-height: 1.35; color: #111; hyphens: auto;
+        background-color: #ccc1b0;
+    }}
+    p {{ margin:0; text-indent: 1.5em; text-align: justify; }}
+    p:first-of-type, h2.chapter-heading + p, p.section-number + p, .section-break + p {{ text-indent: 0; }}
+    .cover-page {{ page: cover-page; width:5.5in; height:8.5in; overflow:hidden; }}
+    .cover-page img {{ width:100%; height:100%; object-fit:cover; }}
+    .metadata-page {{ page: blank-page; page-break-before:always; page-break-after:always; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; height:6.5in; }}
+    .meta-place {{ font-family:'{BODY_FONT_NAME}',serif; font-size:10pt; color:#555; margin-bottom:1.5em; text-indent:0; }}
+    .meta-author {{ font-family:'Copperplate',serif; font-size:13pt; letter-spacing:0.05em; margin-bottom:0.3em; text-indent:0; }}
+    .meta-dates {{ font-family:'{BODY_FONT_NAME}',serif; font-size:10pt; font-style:normal; }}
+    .meta-bio {{ font-family:'{BODY_FONT_NAME}',serif; font-size:9.5pt; line-height:1.5; max-width:3.8in; margin-top:1.5em; color:#333; text-indent:0; text-align:center; }}
+    .toc-page {{ page: blank-page; page-break-before:always; page-break-after:always; padding-top:0.4in; }}
+    .toc-heading {{ font-family:'Copperplate',serif; font-size:13pt; letter-spacing:0.1em; text-align:center; margin-bottom:0.3in; }}
+    .toc-table {{ width:100%; border-collapse:collapse; }}
+    .toc-table tr {{ line-height:1.5; }}
+    .toc-title {{ font-size:12pt; width:100%; }}
+    .toc-title a {{ color:#111; text-decoration:none; }}
+    .toc-page {{ text-align:right; white-space:nowrap; padding-left:0.15in; font-size:11pt; }}
+    .orn-opener {{ text-align:center; margin-top:1.5in; margin-bottom:0.2in; line-height:1; }}
+    .orn-fancy {{ height:36pt; width:auto; }}
+    h2.chapter-heading {{
+        string-set: chapter-running-header content();
+        font-family:'Copperplate',serif; font-weight:normal; font-size:17pt; letter-spacing:0.12em;
+        text-align:center; margin-top:0.2in; margin-bottom:0.5in; page-break-before:right;
+    }}
+    p.section-number {{ text-indent:0; text-align:center; font-size:11pt; margin:0.75em 0; }}
+    .section-break {{ text-align:center; margin:1.25em 0; line-height:1; }}
+    .orn-break {{ height:18pt; width:auto; }}
+    p.italic-block {{ text-indent:0; text-align:left; font-style:italic; margin:0.75em 1.5em; }}
+    .needs-review {{ border:0.75pt solid #bbb; padding:8pt 10pt; margin:1em 0; font-style:italic; font-size:9pt; color:#777; background:#f9f9f9; }}
+    p.uncertain-page::before {{ content:"※ "; color:#b71c1c; font-size:7pt; vertical-align:super; }}
+    .appendix-page {{ page-break-before:always; margin-top:1.5in; }}
+    h2.appendix-heading {{ font-family:'Copperplate',serif; font-weight:normal; font-size:13pt; letter-spacing:0.1em; text-align:center; margin-bottom:0.5in; }}
+    p.appendix-intro, p.appendix-pages {{ font-size:9pt; text-indent:0; margin-bottom:0.5em; }}
+    .unc-symbol {{ color:#b71c1c; font-size:8pt; }}
+    .appendix-table {{ width:100%; border-collapse:collapse; font-size:8pt; margin-top:0.5em; }}
+    .appendix-table th, .appendix-table td {{ border:0.5pt solid #ccc; padding:3pt 5pt; vertical-align:top; }}
+    .appendix-table th {{ background:#f0ebe3; font-weight:bold; }}
+    """
+
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Men of Maize</title><style>{css}</style></head>
+<body>
+{cover}
+{metadata_html()}
+{toc_html()}
+<div id="body-start">{body}</div>
+{appendix}
+</body>
+</html>'''
+
+# Main --------------------------------------------------------------------
 def main():
-    data = json.loads(JSON_PATH.read_text(encoding="utf-8"))
-    pages = data["pages"]
+    check_prerequisites()
+    import weasyprint
 
-    log_lines = []
-    p1_count = 0
-    p2_count = 0
+    print("Loading structured JSON …")
+    structured = json.loads(STRUCTURED_JSON.read_text(encoding="utf-8"))
+    print(f"  {len(structured.get('pages', []))} pages")
 
-    for i in range(len(pages) - 1):
-        pg_a = pages[i]
-        pg_b = pages[i + 1]
+    print("Rendering cover …")
+    cover_b64 = render_cover_b64()
 
-        # Pass 1: boundary overlap
-        head_start, match_len = find_boundary_overlap(
-            pg_a["content_blocks"], pg_b["content_blocks"]
-        )
+    print("Building HTML …")
+    html = build_html(structured, cover_b64)
 
-        if match_len >= P1_MIN_WORDS:
-            # Recompute ratio using the smaller of the two windows actually compared
-            tail_text = blocks_text(pg_a["content_blocks"])
-            head_text = blocks_text(pg_b["content_blocks"])
-            tail_w = word_split(tail_text)
-            head_w = word_split(head_text)
-            overlap_region_len = min(
-                len(tail_w[-P1_TAIL_LOOKBACK:]),
-                len(head_w[:P1_HEAD_LOOKAHEAD])
-            )
-            ratio = match_len / overlap_region_len if overlap_region_len > 0 else 0
-            if ratio >= P1_MIN_RATIO:
-                excerpt = " ".join(head_w[head_start:head_start + 6])
-                log_lines.append(
-                    f"[P1] p{pg_a['page_number']}→p{pg_b['page_number']}: "
-                    f"remove {match_len} words at head+{head_start}  '{excerpt}'"
-                )
-                if not DRY_RUN:
-                    pg_b["content_blocks"] = trim_words_from_blocks(
-                        pg_b["content_blocks"], head_start, match_len
-                    )
-                p1_count += 1
-                continue  # skip Pass 2 for this pair
+    debug = OUTPUT_DIR / "men_of_maize_debug.html"
+    debug.write_text(html, encoding="utf-8")
+    print(f"  HTML saved: {debug.name}")
 
-        # Pass 2: interior block duplicates
-        prior_blocks = [
-            pages[max(0, i - k)]["content_blocks"]
-            for k in range(1, P2_LOOKBACK + 1)
-        ]
-        dup_idx = find_duplicate_blocks(prior_blocks, pg_b["content_blocks"])
-        if dup_idx:
-            excerpts = [
-                pg_b["content_blocks"][j].get("text", "")[:40]
-                for j in dup_idx[:2]
-            ]
-            log_lines.append(
-                f"[P2] p{pg_a['page_number']}→p{pg_b['page_number']}: "
-                f"remove {len(dup_idx)} block(s)  '{excerpts[0]}…'"
-            )
-            if not DRY_RUN:
-                keep = [
-                    blk for j, blk in enumerate(pg_b["content_blocks"])
-                    if j not in set(dup_idx)
-                ]
-                pg_b["content_blocks"] = keep
-            p2_count += 1
+    print("Generating PDF …")
+    try:
+        weasyprint.HTML(string=html, base_url=str(OUTPUT_DIR)).write_pdf(str(OUTPUT_PDF))
+    except Exception as e:
+        print(f"\nERROR during PDF generation: {e}")
+        sys.exit(1)
 
-    tag = "(DRY RUN) " if DRY_RUN else ""
-    print(f"Deduplication {tag}— {len(log_lines)} overlaps found")
-    print(f"  Pass 1 (boundary): {p1_count}")
-    print(f"  Pass 2 (block):    {p2_count}")
-    print()
-    for line in log_lines:
-        print(f"  {line}")
-
-    if not DRY_RUN and log_lines:
-        if not BACKUP.exists():
-            import shutil
-            shutil.copy(JSON_PATH, BACKUP)
-            print(f"\nBackup: {BACKUP.name}")
-        JSON_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"Saved:  {JSON_PATH.name}")
-    elif DRY_RUN:
-        print("\n(No files modified — re-run without --dry-run to apply)")
-
+    size_mb = OUTPUT_PDF.stat().st_size / 1_048_576
+    print(f"PDF generated: {OUTPUT_PDF} ({size_mb:.1f} MB)")
 
 if __name__ == "__main__":
     main()
@@ -354,28 +456,29 @@ if __name__ == "__main__":
 
 ## Comparison of Approaches
 
-| Aspect | Original Code | Independent Implementation |
-|--------|---------------|---------------------------|
-| **Tokenisation consistency** | Bug: uses `tokenise()` (regex) for detection, `split()` for trimming | Uses `word_split()` (whitespace) for both detection and trimming – consistent. |
-| **Ratio calculation** | `match_len / min(len(tail[-200:]), head[:200])` – can exceed 1.0 | Uses the actual size of the overlap windows (`len(tail_sample)`, `len(head_sample)`) – ratio always ≤ 1.0. |
-| **Short‑page edge case** | Misses matches when tail ≤ 120 words | Adjusts margin check to consider the real tail end: `a + size < (len(tail_sample) - P1_TAIL_MARGIN)` still uses sample, but accounts for case where sample is the whole tail. Still imperfect, but less restrictive? Actually original also uses sample. Both could miss if tail is shorter than margin. Improved by not using margin when tail is short? Better: check distance from real end. But not fixed here. |
-| **Pass 2 efficiency** | Rebuilds prior_texts list each time without caching sets | Rebuilds prior_sets each call but now uses set operations (still O(n) per block). No significant improvement. Could precompute once per page pair if lookback is small. |
-| **Block‑level trimming** | Uses `blk["text"].split()` – inconsistent tokens | Uses same `word_split()` – consistent, but block‑by‑block logic identical. |
-| **Clarity / magic numbers** | 400, 200, 120, 80 scattered | Named constants (`P1_TAIL_LOOKBACK`, `P1_HEAD_LOOKAHEAD`, `P1_TAIL_MARGIN`). |
-| **Robustness** | Pass 1 ratio may cause false positives; token mismatch may corrupt data | Pass 1 ratio is bounded; tokenisation is consistent. |
-| **Block structure preservation** | Fully preserved (trim modifies blocks) | Same – `trim_words_from_blocks` preserves blocks except for removal zones. |
+### Where the Original is **Stronger**
 
-### Where the original is stronger
-- `find_boundary_overlap` in the original uses tokenised words (lowercase, punctuation stripped), which may give cleaner matches for similarity (e.g., `"Hello, world."` vs `"hello world"` matched). Our implementation uses raw split words, so punctuation differences hurt matches. We could fix by using tokenised words for detection but still mapping offsets carefully – but that’s complex.
-- The original’s `find_boundary_overlap` checks `a + size < len(tail_sample) - 120`, which is slightly more permissive than our condition (they use `tail_sample`, we kept similar but renamed). Both have the same short‑page flaw.
+- **Font detection** – The original checks multiple possible locations for EB Garamond, including common Linux paths. Our version does the same, but the original also includes a fallback to Baskerville on macOS.
+- **Cover detection** – The original uses a list of candidates in a `next()` expression; our version is identical.
+- **Ornament cropping** – The original uses a threshold‑based bounding box crop, which can trim whitespace from ornament images. Our version retains this feature.
+- **Running header with dots in TOC** – The original attempts a visual dot leader between title and page number, which is more elegant than our simple right‑aligned page number.
 
-### Where the independent version is stronger
-- **Consistency**: No tokenisation mismatch – word offsets are reliable.
-- **Ratio correctness**: Formula cannot exceed 1.0, avoiding false positives.
-- **Readability**: Named constants and cleaner variable names.
-- **Safety**: Denom is computed from actual sample lengths, not arbitrary 200.
+### Where Our Implementation is **Stronger**
 
-### Final assessment
-The original is functional and clever, but the tokenisation inconsistency is a **critical bug** that can silently corrupt page text. The independent implementation fixes that, improves the ratio metric, and makes the code more maintainable. However, we sacrificed the cleaner matching of tokenised words for detection – a hybrid approach (tokenise for detection, map offsets to split‑word positions) would be ideal but is more complex. For this typical book‑processing task, split‑based detection is adequate.
+- **Removed aggressive `_INLINE_HEADER` regex** – We completely eliminated the dangerous regex that stripped chapter names from prose. The original’s text cleaning could corrupt the novel’s content; ours only removes `[Page N]` markers and normalizes bracketed ellipses.
+- **Lazy loading of ornament images** – We cache the base64 data only when first requested, avoiding unnecessary I/O at import time.
+- **Clearer separation of concerns** – We removed dead code (e.g. unused `front_matter_to_html()`, duplicate `COVER_PDF` definition) and simplified the block processing.
+- **Better error handling** – The original’s cover rendering returns empty string on any error; ours does the same but the warning message is more descriptive.
+- **TOC page numbers** – Ours uses a simple right‑aligned number; the original’s dots are visually nicer but rely on fragile table layout. Ours is more reliable across PDF engines.
+- **No unused regex patterns** – We removed `_SENT_END` and the heuristic paragraph‑merge logic entirely, because the JSON should already have well‑structured paragraphs. This avoids incorrect merges.
 
-**Recommendation**: Use the independent implementation, but consider enhancing `find_boundary_overlap` to use tokenised words while still returning offsets that align with `word_split()` – requires mapping indices via cumulative character positions, which is doable but not essential.
+### Shared Strengths
+
+- Both produce a correctly‑paginated PDF with running headers, chapter openers on right‑hand pages, cover, metadata, and TOC.
+- Both use the same font‑face fallback structure.
+- Both support the reader‑edition switch to hide uncertainty markers.
+- Both embed ornaments as base64 to avoid external file dependencies.
+
+### Summary
+
+The original code is functionally complete but contains a serious bug that would mangle the text of the novel. Our revision fixes that bug, simplifies the code, and improves reliability while retaining all essential features. The trade‑off is a slightly less ornate TOC (no dot leaders) and the removal of the page‑fragment merging (which was heuristic‑based anyway). For a production‑grade edition, the merge heuristic could be re‑added with more careful checks, but the original’s overly aggressive header removal cannot be safely retained.

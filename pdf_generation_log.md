@@ -361,3 +361,78 @@ No script changes — first build from the fully corrected Mistral base with all
 **Note on page count drop (317 → 272):** 45 fewer pages than PDF-13. Likely caused by the text corrections compacting content slightly and/or the uncertainty appendix not adding as much as the removed content saves. To be verified during visual review.
 
 **Next:** User to visually review PDF-14 checklist (cover, headers, ornaments, ※ markers, appendix).
+
+---
+
+## Colab Runs 13–17 (PDFs 14–17, June 2026-06-01)
+
+PDF-15 through PDF-17 were incremental fixes built locally and verified with `review_pdf.py`. Each addressed cross-check issues found during visual review (deduplication, OCR corrections, author bio garble, epilogue trailing ellipsis, etc.). Fully documented in `robustness_checks.md` under the PDF-17 cross-check section.
+
+---
+
+## Colab Run 18 — PDF-18 (2026-06-09)
+
+**Purpose:** Apply 52 source-confirmed text corrections (Pass 18).
+
+All 52 garbled passages identified by scanning PDF-17, then cross-checked against 4 raw sources (Qwen, Mistral, OpenAI, Claude base). Applied via scripts `22_apply_pass18_corrections.py` + `23_apply_pass18b_corrections.py`. Also deleted duplicate ~1.5-page Section XV in Coyote-Postman.
+
+| Check | Result |
+|-------|--------|
+| Pages | ~270 |
+| Build errors | None |
+| Key fix | 52 garbled passages corrected; 1 structural duplicate deleted |
+
+---
+
+## Colab Run 19 — PDF-19 (2026-06-09)
+
+**Purpose:** New layout (metadata page, linked TOC, EB Garamond) + GASPAR ILÓM manual transcription.
+
+**Script changes in `03_build_pdf.py`:**
+- Added `metadata_page_html()` — page 2 with Guatemala/Buenos Aires dates + author bio
+- Added `toc_page_html()` — single-page linked TOC (all chapters hyperlinked)
+- `render_cover_b64()` updated to handle PNG input (`1.png`)
+- Body font switched to EB Garamond (auto-detected at `/usr/share/fonts/truetype/ebgaramond/`)
+- Font size 10pt → 11pt, margins narrowed to widen text area ~10%
+- Ornaments swapped: `ornament_fancy.png` ↔ `ornament_break.png`
+
+**JSON changes:**
+- Pages 1–14 replaced with clean manual transcription (script `24_insert_gaspar_transcription.py`)
+- Epilogue trimmed: Guatemala dates + garbled pages 337+ removed
+- Front matter cleared (replaced by hardcoded HTML in build script)
+- Total pages: 272 → 265 after restructure
+
+**Colab install cell required:**
+```
+apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0
+apt-get install -y fonts-ebgaramond
+pip install weasyprint PyMuPDF pillow -q
+```
+
+| Check | Result |
+|-------|--------|
+| Pages | ~385 |
+| Build errors | None |
+| Font | EB Garamond (confirmed loaded) |
+| TOC | Single page, linked |
+
+---
+
+## Colab Run 20 — PDF-20 FINAL (2026-06-09)
+
+**Purpose:** Fix 417 mid-sentence paragraph splits.
+
+530 paragraph blocks in the JSON started with lowercase letters — all were mid-sentence continuations from Mistral's spread-boundary transcription, incorrectly stored as separate `<p>` blocks. One-pass merge applied to JSON (script inline, backup as `men_of_maize_structured_PREMERGE.json`).
+
+No script changes to `03_build_pdf.py`. JSON uploaded to Colab, same three cells.
+
+| Check | Result |
+|-------|--------|
+| Pages | ~385 |
+| Build errors | None |
+| Paragraph merges | 417 applied |
+| Status | **FINAL — ready to publish** |
+
+**Remaining known imperfections (accepted):**
+- `[illegible]` placeholders at book pp. 52, 226, 314 (original photos needed)
+- ~20 page-boundary duplicate passages (review tool flags them; not visible to reader)

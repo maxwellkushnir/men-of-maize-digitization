@@ -338,38 +338,82 @@ Each `!` command in Claude Code runs in a fresh shell. Always chain: `export ANT
 
 ---
 
-## Key Files
+## Session 2026-06-08/09 — Final Pass
+
+### Pass 18: 52 source-confirmed text corrections
+
+Scanned PDF-17 end-to-end; identified 52 garbled passages (page-boundary OCR artifacts, fused sentences, wrong words). Cross-checked every glitch against all four raw sources (Qwen, Mistral, OpenAI, Claude base) — all corrections confirmed by majority. Scripts `22_apply_pass18_corrections.py` and `23_apply_pass18b_corrections.py` applied fixes to both `men_of_maize_clean.txt` and `men_of_maize_structured.json`. Also deleted a duplicate ~1.5-page passage in Coyote-Postman (Section XV appeared twice).
+
+Notable corrections:
+- Piojosa passage (p. 18): `"capillary tears"` → `"caterpillar tears"`, `"cactus-tree gum"` restored
+- Colonel Godoy (p. 71): `"felt someone then a bullet"` → `"felt someone jarring on his tail"`
+- `"the sallion"` → `"the stallion"`; `"bloodlost"` → `"bellows"`; `"I'm stoping"` → `"I'm stopping"`
+- Colonel Godoy pp. 88–91: two missing/garbled sentences restored from Claude base
+- 20+ Coyote-Postman garbles fixed (barber scene, dice game, Ramos conversation, etc.)
+
+**PDF-18 built** (all 52 corrections, no layout changes).
+
+### PDF Restructure
+
+New page order: Cover → Metadata page → Linked TOC → Book content
+
+- **Metadata page** (page 2): `Guatemala, October 1945 / Buenos Aires, 17th May 1949 / MIGUEL ÁNGEL ASTURIAS / 1899–1974` + author bio
+- **Table of contents** (page 3): single page, every chapter title and book page number is a clickable PDF link to the chapter heading
+- **Epilogue** trimmed: ends at `"ants, ants, ants, ants …"` — trailing Guatemala dates and garbled author bio removed from JSON
+- Old multi-page front matter and garbled pages 337+ deleted from JSON
+
+### GASPAR ILÓM Chapter I — manual transcription
+
+User manually transcribed the first 7 spreads of `2-25.pdf` (book pages 1–14) into `Part I Chapter 1 transcribed.txt`. Script `24_insert_gaspar_transcription.py` replaced garbled JSON pages 1–14 with this clean text, organized as:
+- Page 1: GASPAR ILÓM heading + Section I (all) + section break
+- Page 7: Colonel Godoy/serenade scene + big ornament break + Section II heading + "The sun let down its hair…" (previously missing from JSON entirely)
+
+JSON pages 1–14 (8 old garbled entries) → 2 clean entries. Pages 15+ unchanged.
+
+### Typography
+
+- Body font: **Baskerville → EB Garamond** (`apt-get install fonts-ebgaramond` in Colab); size 10pt → 11pt, leading 1.3 → 1.35
+- Ornaments swapped: chapter openers now use `ornament_fancy.png`; section breaks use `ornament_break.png`
+- Margins widened ~10%: right 0.75in → 0.65in, left 0.875in → 0.75in
+
+**PDF-19 built.**
+
+### 417 paragraph merges
+
+Discovered 530 paragraph blocks in the JSON starting with a lowercase letter — all mid-sentence continuations from the Mistral transcription's spread boundaries being incorrectly preserved as separate `<p>` blocks. One-pass merge: if a paragraph starts lowercase, append it to the previous paragraph. 417 merges applied. Backup: `men_of_maize_structured_PREMERGE.json`.
+
+**PDF-20 built — FINAL.**
+
+---
+
+## Key Files (Final State)
 
 ```
 Raw Data (to use)/
-  robustness_checks.md         ← READ FIRST: current state, next step, QA results
-  first_draft_pass.md          ← this document: full project history
-  pdf_generation_log.md        ← Colab run logs (Runs 1–13)
-  t1_vs_t2_divergences.md      ← 788 T1 vs T2 divergences (QA reference)
+  robustness_checks.md              ← READ FIRST: current state + session history
+  first_draft_pass.md               ← this document: full project history
+  pdf_generation_log.md             ← Colab run logs (Runs 1–20)
+  t1_vs_t2_divergences.md           ← 788 T1 vs T2 divergences (QA reference)
+  Part I Chapter 1 transcribed.txt  ← Manual transcription of GASPAR ILÓM opening
+  1.png                             ← New cover image (PNG, used from PDF-19 onwards)
   take2/
-    01_transcribe.py           ← Stage 1: transcription via Claude vision
-    02_assemble.py             ← Stage 2: clean + structure raw text
-    03_build_pdf.py            ← Stage 3: typeset to PDF (run in Colab)
-    04_compare.py              ← QA diff vs Take 1
-    17_apply_mc_corrections.py ← Rule 2c: single-word Q=C_orig≠M corrections
-    18_text_adjudication.py    ← GPT-5.5 vision adjudication of Q≠M≠C spans
-    19_openai_transcribe.py    ← GPT-5.5 full vision re-transcription of affected spreads
+    03_build_pdf.py           ← PDF build (Colab) — EB Garamond, linked TOC, metadata page
+    22_apply_pass18_corrections.py  ← Pass 18 corrections (first round)
+    23_apply_pass18b_corrections.py ← Pass 18b corrections (curly-quote fixes)
+    24_insert_gaspar_transcription.py ← Inserts manual Chapter 1 transcription
     output/
-      men_of_maize_clean.txt             ✓ all corrections applied (Rules 1/2a/2b/2c + GPT-5.5)
-      men_of_maize_structured.json       ✓ all corrections applied, ready for PDF-14 build
-      men_of_maize_clean_CLAUDE_BASE.txt ← backup of original Claude base
-      men_of_maize_structured_CLAUDE_BASE.json ← backup of original Claude base
-      divergence_review.html             ← Q≠M review queue (515 Q≠M≠C spans remain)
-      three_way_report.html              ← final three-way comparison scores
-      openai_raw/                        ← GPT-5.5 raw re-transcriptions (per-PDF .txt files)
-      openai_corrections_log.txt         ← Script 19 corrections log
-      text_adjudication_log.txt          ← Script 18 adjudication log
-      qwen_raw/                          ← Qwen blind re-transcription (174 spreads)
-      mistral_raw/                       ← Mistral blind re-transcription (174 spreads)
+      men_of_maize_clean.txt              ← assembled text (all corrections applied)
+      men_of_maize_structured.json        ← ⬅ CURRENT: 265 pages, all corrections, final
+      men_of_maize_structured_PREPASS18.json   ← backup before pass 18
+      men_of_maize_structured_PREMERGE.json    ← backup before paragraph merges
+      men_of_maize_clean_CLAUDE_BASE.txt       ← backup of original Claude base
+      pass18_corrections_log.txt               ← log of all 52 corrections
+      pass18b_corrections_log.txt              ← log of second-round corrections
     PDFs/
-      men_of_maize-13.pdf      ← last built PDF (317 pages; pre-correction passes)
-      men_of_maize-14.pdf      ← ⬅ TO BUILD: upload structured.json to Colab, run 03_build_pdf.py
+      men_of_maize-17.pdf  ← last pre-session PDF (corrections only, old layout)
+      men_of_maize-18.pdf  ← 52 text corrections, no layout change
+      men_of_maize-19.pdf  ← new layout + EB Garamond + GASPAR ILÓM transcription
+      men_of_maize-20.pdf  ← ⬅ FINAL: paragraph merges applied
 Take 1/
   men_of_maize_full_text.txt   ← prior 70% pass (reference only)
-  failed_spreads/              ← JPEG images of originally blocked spreads
 ```
