@@ -80,4 +80,4 @@ The working documents above were written for the project, not for an audience �
 
 ## A note on authorship
 
-This README and the project's working documents were written by Claude Code — directed, reviewed, and corrected throughout by Max, the project's author.
+This README and the project's working documents were written by Claude Code — directed, reviewed, and corrected throughout by Maxwell Kushnir, the project's author.
