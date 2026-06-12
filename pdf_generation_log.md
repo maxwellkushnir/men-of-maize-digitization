@@ -436,3 +436,20 @@ No script changes to `03_build_pdf.py`. JSON uploaded to Colab, same three cells
 **Remaining known imperfections (accepted):**
 - `[illegible]` placeholders at book pp. 52, 226, 314 (original photos needed)
 - ~20 page-boundary duplicate passages (review tool flags them; not visible to reader)
+
+---
+
+## Colab Run 21 — PDF-21 (2026-06-11, pending)
+
+**Purpose:** Two cosmetic fixes found during publication review.
+
+**Script changes in `03_build_pdf.py`:**
+- `_TOC_ENTRIES` displayed page numbers corrected from original print page numbers to actual PDF page positions: 1→5, 23→29, 49→57, 71→79, 103→113, 163→177, 329→355. Anchors unchanged — links still jump correctly.
+- New closing page at the very end of the document: blank page (uses existing `blank-page` named page, so no running headers or page number) with `ornament_fancy.png` centered (`.closing-page`, padding-top 3.2in). Marks the formal end of the book.
+- **EB Garamond detection hardened.** First Run 21 attempt (2026-06-12) silently fell back to DejaVu: Colab's updated runtime image installs `fonts-ebgaramond` outside the hardcoded paths, so the build printed `Body font: Baskerville (system fallback)` — that PDF was discarded. Script now searches all of `/usr/share/fonts` for `EBGaramond*Regular*` (prefers 12pt optical size, skips SC variants) before falling back. **Always verify the build prints `Body font: EB Garamond (found)`.**
+
+**No JSON changes.** Upload `take2/03_build_pdf.py` + `take2/output/men_of_maize_structured.json` (+ `1.png`, ornament PNGs, `Copperplate.ttc`) to Colab; same three cells as Runs 19–20, install cell unchanged.
+
+**Note:** Publicly the iteration count stays "twenty" (Max's call) — stat cards and blog unchanged.
+
+**Run 21 outcome (2026-06-12):** Built successfully on second attempt (font fix). Output saved as `men_of_maize-FINAL.pdf` (346 pages). Max then found two TOC numbers still wrong: Coyote-Postman 177→175, Epilogue 355→345. Fixed **without rebuilding** via local PyMuPDF surgery: redacted the two spans, rewrote the numbers using the PDF's own embedded EB Garamond (right-aligned, same baseline/size/color), restored the two click-links removed by redaction (14/14 links verified). Result: **`men_of_maize-FINAL-tocfix.pdf` — the publication file.** `_TOC_ENTRIES` in the script updated to 175/345 for future builds.

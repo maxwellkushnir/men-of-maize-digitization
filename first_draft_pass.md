@@ -386,6 +386,28 @@ Discovered 530 paragraph blocks in the JSON starting with a lowercase letter —
 
 ---
 
+## Session 2026-06-10/12 — Publication Prep
+
+### Blog & GitHub setup
+- Blog draft lives in `Blog/Men of Maize.docx` (Max writes; Claude critiques/brainstorms — Claude drafted only the technical paragraph, on request)
+- Narrative GitHub README drafted at `Blog/External Facing/README_draft.md` — the one document a repo visitor reads; everything else is raw material ("clone it and ask your own Claude Code")
+- Stat cards finalized: **4 AI models / 20 PDF passes / 175 photographed spreads** (in `blog_notes.md`, `README.md`; iteration count publicly stays "twenty" despite Run 21)
+- Penguin Classics reissued the Gerald Martin translation Sept 2024 (paperback + ebook) — all docs now date the scarcity claim to 2020 and point buyers to that edition
+- PDF hosted on Google Drive: https://drive.google.com/file/d/16l0jQDiBAeTZIVikmtTjvXyOhxkVmShq/view?usp=sharing (Max replaces content via Manage versions so the link never changes)
+
+### Run 21 + TOC surgery (see `pdf_generation_log.md` for detail)
+- `03_build_pdf.py`: TOC page numbers corrected to actual PDF positions; closing ornament page added at book's end; EB Garamond detection hardened (Colab image moved the font files — first attempt silently fell back to DejaVu)
+- Two remaining TOC numbers (175, 345) fixed by local PyMuPDF surgery on the built PDF — no rebuild
+- **Publication file: `take2/PDFs/men_of_maize-FINAL-tocfix.pdf`** (346 pages)
+
+### Publication sequence (remaining)
+1. Max: replace Drive file with the final PDF (Manage versions); add a PDF of the blog post to Drive
+2. Claude (on "execute"): replace repo `README.md` with the narrative draft, clean up, stage commit for Max's review, push on approval
+3. Max: publish Substack (links to Drive book + blog PDF + GitHub)
+4. Claude: backfill the Substack URL into README + blog_notes (small second push)
+
+---
+
 ## Key Files (Final State)
 
 ```

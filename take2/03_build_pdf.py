@@ -37,6 +37,14 @@ _ebgaramond_paths = [
     Path("/usr/share/fonts/truetype/ebgaramond/EBGaramond12-Regular.ttf"),
 ]
 _ebgaramond_found = next((p for p in _ebgaramond_paths if p.exists()), None)
+if _ebgaramond_found is None and Path("/usr/share/fonts").exists():
+    # Colab images move these files around (opentype/, optical-size names);
+    # search the whole font tree before falling back to Baskerville
+    _candidates = sorted(
+        Path("/usr/share/fonts").rglob("EBGaramond*Regular*"),
+        key=lambda p: ("SC" in p.name, "12" not in p.name, p.name),
+    )
+    _ebgaramond_found = _candidates[0] if _candidates else None
 
 _baskerville_local  = Path(__file__).parent / "Baskerville.ttc"
 _baskerville_system = Path("/System/Library/Fonts/Supplemental/Baskerville.ttc")
@@ -265,13 +273,13 @@ def front_matter_to_html(front_matter: list) -> str:
 
 
 _TOC_ENTRIES = [
-    ("Gaspar Ilóm",                  "chap-gaspar-ilom",               1),
-    ("Machojón",                     "chap-machojon",                  23),
-    ("The Deer of the Seventh Fire", "chap-the-deer-of-the-seventh-fire", 49),
-    ("Colonel Chalo Godoy",          "chap-colonel-chalo-godoy",       71),
-    ("María Tecún",                  "chap-maria-tecun",              103),
-    ("Coyote-Postman",               "chap-coyote-postman",           163),
-    ("Epilogue",                     "chap-epilogue",                 329),
+    ("Gaspar Ilóm",                  "chap-gaspar-ilom",               5),
+    ("Machojón",                     "chap-machojon",                  29),
+    ("The Deer of the Seventh Fire", "chap-the-deer-of-the-seventh-fire", 57),
+    ("Colonel Chalo Godoy",          "chap-colonel-chalo-godoy",       79),
+    ("María Tecún",                  "chap-maria-tecun",              113),
+    ("Coyote-Postman",               "chap-coyote-postman",           175),
+    ("Epilogue",                     "chap-epilogue",                 345),
 ]
 
 def metadata_page_html() -> str:
@@ -378,6 +386,14 @@ def build_html(structured: dict, cover_b64: str) -> str:
     toc_html      = toc_page_html()
     body_html     = pages_to_html(structured.get("pages", []))
     appendix_html = "" if READER_EDITION else uncertainty_appendix_html(structured)
+
+    # Closing page: blank except a centered ornament, marking the end of the book
+    closing_html = ""
+    if ORN_FANCY:
+        closing_html = f'''
+    <div class="closing-page">
+      {_orn_img(ORN_FANCY, "orn-fancy")}
+    </div>'''
 
     css = f"""
     @font-face {{
@@ -579,6 +595,12 @@ def build_html(structured: dict, cover_b64: str) -> str:
       height: 36pt;
       width: auto;
     }}
+    .closing-page {{
+      page: blank-page;
+      page-break-before: always;
+      text-align: center;
+      padding-top: 3.2in;
+    }}
     h2.chapter-heading {{
       string-set: chapter-running-header content();
       font-family: 'Copperplate', Copperplate, 'Copperplate Gothic Light', serif;
@@ -699,6 +721,7 @@ def build_html(structured: dict, cover_b64: str) -> str:
 {body_html}
 </div>
 {appendix_html}
+{closing_html}
 </body>
 </html>"""
     return html

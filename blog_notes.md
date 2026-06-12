@@ -4,16 +4,16 @@
 
 - **GitHub repo:** https://github.com/maxwellkushnir/men-of-maize-digitization
 - **Substack:** https://buildingdiplomacy.substack.com/
-- **Blog post:** *(link to add when published)*
-- **PDF download:** *(link to add — Google Drive or direct)*
+- **Blog post:** https://buildingdiplomacy.substack.com/p/men-of-maize (published 2026-06-12)
+- **PDF download:** https://drive.google.com/file/d/16l0jQDiBAeTZIVikmtTjvXyOhxkVmShq/view?usp=sharing
 
 ---
 
 ## Stat cards (top of blog)
 
-| 4 | 20 | 95% |
+| 4 | 20 | 175 |
 |---|----|----|
-| AI models used | PDF passes | Agreement rate between independent models |
+| AI models used | PDF passes | Photographed spreads |
 
 ---
 

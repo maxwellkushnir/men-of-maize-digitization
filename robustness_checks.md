@@ -25,7 +25,7 @@
 ---
 
 **Purpose:** Verify that the assembled text (`men_of_maize_clean.txt`) is accurate before publishing the PDF.  
-**Current PDF:** `take2/PDFs/men_of_maize-20.pdf` — **FINAL. Ready to publish.**
+**Current PDF:** `take2/PDFs/men_of_maize-FINAL-tocfix.pdf` (Run 21 + local TOC surgery, 2026-06-12) — **FINAL publication file.** May be renamed `-REAL` by Max for Drive upload. Supersedes `men_of_maize-20.pdf`.
 
 ---
 
